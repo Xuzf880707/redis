@@ -214,14 +214,14 @@ void dbOverwrite(redisDb *db, robj *key, robj *val) {
  *
  * All the new keys in the database should be created via this interface. */
 void setKey(redisDb *db, robj *key, robj *val) {
-    if (lookupKeyWrite(db,key) == NULL) {
+    if (lookupKeyWrite(db,key) == NULL) {//没有的话直接添加
         dbAdd(db,key,val);
     } else {
-        dbOverwrite(db,key,val);
+        dbOverwrite(db,key,val);//有的话覆盖
     }
-    incrRefCount(val);
-    removeExpire(db,key);
-    signalModifiedKey(db,key);
+    incrRefCount(val);//增加val的引用次数，如果是一个Integer的话
+    removeExpire(db,key);//移除key的失效时间
+    signalModifiedKey(db,key);//通知key被修改了
 }
 
 int dbExists(redisDb *db, robj *key) {
@@ -618,26 +618,31 @@ int parseScanCursorOrReply(client *c, robj *o, unsigned long *cursor) {
  *
  * In the case of a Hash object the function returns both the field and value
  * of every element on the Hash. */
+ //o是扫描的目标
 void scanGenericCommand(client *c, robj *o, unsigned long cursor) {
     int i, j;
-    list *keys = listCreate();
+    list *keys = listCreate();//创建一个列表
     listNode *node, *nextnode;
-    long count = 10;
+    long count = 10;//默认是10，返回10条
     sds pat = NULL;
     int patlen = 0, use_pattern = 0;
     dict *ht;
 
     /* Object must be NULL (to iterate keys names), or the type of the object
      * must be Set, Sorted Set, or Hash. */
+     //首先对o进行校验，如果o不是NULL，或者o的类型不是REDIS_SET、REDIS_HASH、REDIS_ZSET其中之一的话，则直接报错退出
     serverAssert(o == NULL || o->type == OBJ_SET || o->type == OBJ_HASH ||
                 o->type == OBJ_ZSET);
 
     /* Set i to the first option argument. The previous one is the cursor. */
+    //将i置为命令中第一个可选参数的索引；对于scan命令，i为2，其他scan命令，i为3 ,也即是获得cursor
+    //SCAN cursor [MATCH pattern] [COUNT count]
     i = (o == NULL) ? 2 : 3; /* Skip the key argument if needed. */
 
     /* Step 1: Parse options. */
+    //解析可选参数count和match的值，如果没有可选参数count，则将其设置为10
     while (i < c->argc) {
-        j = c->argc - i;
+        j = c->argc - i;//参数个数
         if (!strcasecmp(c->argv[i]->ptr, "count") && j >= 2) {
             if (getLongFromObjectOrReply(c, c->argv[i+1], &count, NULL)
                 != C_OK)
@@ -645,7 +650,7 @@ void scanGenericCommand(client *c, robj *o, unsigned long cursor) {
                 goto cleanup;
             }
 
-            if (count < 1) {
+            if (count < 1) {//解析错误的情况，则向客户端反馈syntaxerr，并在清理工作之后返回；
                 addReply(c,shared.syntaxerr);
                 goto cleanup;
             }
@@ -678,18 +683,18 @@ void scanGenericCommand(client *c, robj *o, unsigned long cursor) {
     ht = NULL;
     if (o == NULL) {
         ht = c->db->dict;
-    } else if (o->type == OBJ_SET && o->encoding == OBJ_ENCODING_HT) {
+    } else if (o->type == OBJ_SET && o->encoding == OBJ_ENCODING_HT) {//如果是set的hash表
         ht = o->ptr;
-    } else if (o->type == OBJ_HASH && o->encoding == OBJ_ENCODING_HT) {
+    } else if (o->type == OBJ_HASH && o->encoding == OBJ_ENCODING_HT) {//如果是hash的hash表
         ht = o->ptr;
         count *= 2; /* We return key / value for this type. */
-    } else if (o->type == OBJ_ZSET && o->encoding == OBJ_ENCODING_SKIPLIST) {
-        zset *zs = o->ptr;
+    } else if (o->type == OBJ_ZSET && o->encoding == OBJ_ENCODING_SKIPLIST) {//如果是跳跃表
+        zset *zs = o->ptr;//先找出zset，在获得字典
         ht = zs->dict;
         count *= 2; /* We return key / value for this type. */
     }
-
-    if (ht) {
+    //由于redis的ziplist, intset等类型数据量挺少，所以可用一次返回的。下面的else if 做这个事情。全部返回一个key
+    if (ht) {//一般的存储，不是intset, ziplist
         void *privdata[2];
         /* We set the max number of iterations to ten times the specified
          * COUNT, so if the hash table is in a pathological state (very
@@ -703,24 +708,25 @@ void scanGenericCommand(client *c, robj *o, unsigned long cursor) {
         privdata[0] = keys;
         privdata[1] = o;
         do {
+        //一个个扫描，从cursor开始，然后调用回调函数将数据设置到keys返回数据集里面。
             cursor = dictScan(ht, cursor, scanCallback, NULL, privdata);
         } while (cursor &&
               maxiterations-- &&
               listLength(keys) < (unsigned long)count);
-    } else if (o->type == OBJ_SET) {
+    } else if (o->type == OBJ_SET) {//如果是inset,因为hashtable会走上一个分支
         int pos = 0;
         int64_t ll;
 
-        while(intsetGet(o->ptr,pos++,&ll))
+        while(intsetGet(o->ptr,pos++,&ll))//将这个set里面的数据全部返回，因为它是压缩的intset，会很小的。
             listAddNodeTail(keys,createStringObjectFromLongLong(ll));
         cursor = 0;
-    } else if (o->type == OBJ_HASH || o->type == OBJ_ZSET) {
+    } else if (o->type == OBJ_HASH || o->type == OBJ_ZSET) {//那么一定是ziplist了，字符串表示的数据结构，不会太大。
         unsigned char *p = ziplistIndex(o->ptr,0);
         unsigned char *vstr;
         unsigned int vlen;
         long long vll;
 
-        while(p) {
+        while(p) {//扫描整个键，然后全部返回这一条。并且返回cursor为0表示没东西了。其实这个就等于没有遍历。从尾巴开始遍历
             ziplistGet(p,&vstr,&vlen,&vll);
             listAddNodeTail(keys,
                 (vstr != NULL) ? createStringObject((char*)vstr,vlen) :
@@ -733,6 +739,7 @@ void scanGenericCommand(client *c, robj *o, unsigned long cursor) {
     }
 
     /* Step 3: Filter elements. */
+    //对keys列表中的数据进行过滤
     node = listFirst(keys);
     while (node) {
         robj *kobj = listNodeValue(node);

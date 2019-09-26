@@ -3630,8 +3630,9 @@ int bitmapTestBit(unsigned char *bitmap, int pos) {
 
 /* Set the bit at position 'pos' in a bitmap. */
 void bitmapSetBit(unsigned char *bitmap, int pos) {
+    //根据索引位置 计算字节索引
     off_t byte = pos/8;
-    int bit = pos&7;
+    int bit = pos&7;//计算在命中的字节中的位索引
     bitmap[byte] |= 1<<bit;
 }
 

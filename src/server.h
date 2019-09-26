@@ -182,10 +182,14 @@ typedef long long mstime_t; /* millisecond time type. */
 #define STATS_METRIC_COUNT 3
 
 /* Protocol and I/O related defines */
+//最大的输入缓冲区大小
 #define PROTO_MAX_QUERYBUF_LEN  (1024*1024*1024) /* 1GB max query buffer. */
+// 每次从socket读取的数据的默认大小 16k
 #define PROTO_IOBUF_LEN         (1024*16)  /* Generic I/O buffer size */
+// I/O缓冲区大小 16k
 #define PROTO_REPLY_CHUNK_BYTES (16*1024) /* 16k output buffer */
 #define PROTO_INLINE_MAX_SIZE   (1024*64) /* Max size of inline reads */
+//处理的bulk的大小大于REDIS_MBULK_BIG_ARG（32KB），则将读取数据大小设置为该bulk剩余数据的大小。
 #define PROTO_MBULK_BIG_ARG     (1024*32)
 #define LONG_STR_SIZE      21          /* Bytes needed for long -> str + '\0' */
 #define REDIS_AUTOSYNC_BYTES (1024*1024*32) /* fdatasync every 32MB */
@@ -799,8 +803,15 @@ typedef struct client {
     int reqtype;            /* Request protocol type: PROTO_REQ_* */
     int multibulklen;       /* Number of multi bulk arguments left to read. */
     long bulklen;           /* Length of bulk argument in multi bulk request. */
-    list *reply;            /* List of reply objects to send to the client. */
+    //动态缓冲区列表
+     *reply;            /* List of reply objects to send to the client. */
+    //动态缓冲区列表的长度（对象个数）
     unsigned long long reply_bytes; /* Tot bytes of objects in reply list. */
+   /* Response buffer */
+    //固定缓冲区已使用的字节数
+    int bufpos;
+    //字节数为固定缓冲区
+    char buf[PROTO_REPLY_CHUNK_BYTES];
     size_t sentlen;         /* Amount of bytes already sent in the current
                                buffer or object being sent. */
     time_t ctime;           /* Client creation time. */
@@ -835,9 +846,7 @@ typedef struct client {
     sds peerid;             /* Cached peer ID. */
     listNode *client_list_node; /* list node in client list */
 
-    /* Response buffer */
-    int bufpos;
-    char buf[PROTO_REPLY_CHUNK_BYTES];
+
 } client;
 
 struct saveparam {

@@ -101,8 +101,9 @@ typedef void (dictScanBucketFunction)(void *privdata, dictEntry **bucketref);
 #define DICT_HT_INITIAL_SIZE     4
 
 /* ------------------------------- Macros ------------------------------------*/
+/* 释放节点value，实际上调用dictType中的 valDestructor 函数 */
 #define dictFreeVal(d, entry) \
-    if ((d)->type->valDestructor) \
+    if ((d)->type->valDestructor) \//删除key的实现函数
         (d)->type->valDestructor((d)->privdata, (entry)->v.val)
 
 #define dictSetVal(d, entry, _val_) do { \
@@ -120,11 +121,11 @@ typedef void (dictScanBucketFunction)(void *privdata, dictEntry **bucketref);
 
 #define dictSetDoubleVal(entry, _val_) \
     do { (entry)->v.d = _val_; } while(0)
-
+/* 释放节点的键key */
 #define dictFreeKey(d, entry) \
     if ((d)->type->keyDestructor) \
         (d)->type->keyDestructor((d)->privdata, (entry)->key)
-
+/* 设置节点key */
 #define dictSetKey(d, entry, _key_) do { \
     if ((d)->type->keyDup) \
         (entry)->key = (d)->type->keyDup((d)->privdata, _key_); \

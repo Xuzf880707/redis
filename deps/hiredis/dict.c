@@ -86,22 +86,26 @@ static int _dictInit(dict *ht, dictType *type, void *privDataPtr) {
 
 /* Expand or create the hashtable */
 static int dictExpand(dict *ht, unsigned long size) {
-    dict n; /* the new hashtable */
-    unsigned long realsize = _dictNextPower(size), i;
+    dict n; /* the new hashtable *///新建一个字典表
+    //计算扩展或缩放新哈希表的大小(调用下面函数_dictNextPower())
+    unsigned long realsize = _dictNextPower(size), i;//
 
     /* the size is invalid if it is smaller than the number of
      * elements already inside the hashtable */
+    //如果正在rehash或者新哈希表的大小小于现已使用，则返回error */
     if (ht->used > size)
         return DICT_ERR;
-
+    /* 初始化新哈希表 */
     _dictInit(&n, ht->type, ht->privdata);
     n.size = realsize;
     n.sizemask = realsize-1;
+    // 将table指向dictEntry 分配内存
     n.table = calloc(realsize,sizeof(dictEntry*));
 
     /* Copy all the elements from the old to the new table:
      * note that if the old hash table is empty ht->size is zero,
      * so dictExpand just creates an hash table. */
+    //将h[0]的数据copy到h[1]
     n.used = ht->used;
     for (i = 0; i < ht->size && ht->used > 0; i++) {
         dictEntry *he, *nextHe;
@@ -124,6 +128,7 @@ static int dictExpand(dict *ht, unsigned long size) {
         }
     }
     assert(ht->used == 0);
+    //全部copy完了才会释放旧的字典表的内存，所以最多时候是2倍的内存
     free(ht->table);
 
     /* Remap the new hashtable in the old */
@@ -132,6 +137,7 @@ static int dictExpand(dict *ht, unsigned long size) {
 }
 
 /* Add an element to the target hash table */
+//向字典中添加新键值对
 static int dictAdd(dict *ht, void *key, void *val) {
     int index;
     dictEntry *entry;
@@ -292,6 +298,11 @@ static void dictReleaseIterator(dictIterator *iter) {
 /* ------------------------- private functions ------------------------------ */
 
 /* Expand the hash table if needed */
+/*
+*   判断是否需要扩展字典
+*   1、字典表为空，则要初始化扩展字典为4
+*   2、如果字典表的容量size=已被使用的used，则双倍容量扩展
+**/
 static int _dictExpandIfNeeded(dict *ht) {
     /* If the hash table is empty expand it to the initial size,
      * if the table is "full" dobule its size. */
@@ -317,17 +328,25 @@ static unsigned long _dictNextPower(unsigned long size) {
 /* Returns the index of a free slot that can be populated with
  * an hash entry for the given 'key'.
  * If the key already exists, -1 is returned. */
+ //获得新键的hash索引
 static int _dictKeyIndex(dict *ht, const void *key) {
     unsigned int h;
     dictEntry *he;
 
     /* Expand the hashtable if needed */
+    //判断是否需要扩容，不足则扩容.
+    //如果是在扩容，且扩容失败怎么返回-1
     if (_dictExpandIfNeeded(ht) == DICT_ERR)
         return -1;
     /* Compute the key hash value */
+    //走到这边表示：要吗扩容成功，要吗无需扩容
+    //计算键在哈希表中的索引位置
     h = dictHashKey(ht, key) & ht->sizemask;
     /* Search if this slot does not already contain the given key */
+    //获得哈希表索引位置的元素
     he = ht->table[h];
+    //如果索引位置上已存在元素，则加到哈希槽对应的链表的最后
+    //如果链表还是那个已有元素，且元素和当前的key一样，则返回-1
     while(he) {
         if (dictCompareHashKeys(ht, key, he->key))
             return -1;
