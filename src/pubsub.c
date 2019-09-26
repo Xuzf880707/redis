@@ -142,27 +142,33 @@ int clientSubscriptionsCount(client *c) {
 
 /* Subscribe a client to a channel. Returns 1 if the operation succeeded, or
  * 0 if the client was already subscribed to that channel. */
+ //订阅频道
 int pubsubSubscribeChannel(client *c, robj *channel) {
-    dictEntry *de;
-    list *clients = NULL;
+    dictEntry *de; //定义一个字典value
+    list *clients = NULL;//定义一个客户端列表
     int retval = 0;
-
+    //将频道加入到该client的pubsub_channels，这个pubsub_channels是一个字典
+    //pubsub_channels中以channel为key用dict的方式组织
     /* Add the channel to the client -> channels hash table */
     if (dictAdd(c->pubsub_channels,channel,NULL) == DICT_OK) {
         retval = 1;
-        incrRefCount(channel);
+        incrRefCount(channel);//增加频道的引用
         /* Add the client to the channel -> list of clients hash table */
-        de = dictFind(server.pubsub_channels,channel);
-        if (de == NULL) {
+        /* server.pubsub_channels记录了所有被订阅的channel
+        以及订阅特定channel的clients, 这里把c加到该channel对应的列表当中 */
+        de = dictFind(server.pubsub_channels,channel);//检查server.pubsub_channel中的字典是否维护了该频道的链表
+        if (de == NULL) {//如果暂未维护该频道的链表，则新建一个链表
             clients = listCreate();
             dictAdd(server.pubsub_channels,channel,clients);
             incrRefCount(channel);
         } else {
             clients = dictGetVal(de);
         }
+        //将当前客户端加入到该链表里
         listAddNodeTail(clients,c);
     }
     /* Notify the client */
+        /* 给客户端生成答复 */
     addReplyPubsubSubscribed(c,channel);
     return retval;
 }
@@ -181,12 +187,14 @@ int pubsubUnsubscribeChannel(client *c, robj *channel, int notify) {
     if (dictDelete(c->pubsub_channels,channel) == DICT_OK) {
         retval = 1;
         /* Remove the client from the channel -> clients list hash table */
+        /* 从server.pubsub_channels中该channel维护的client列表上删除该client */
         de = dictFind(server.pubsub_channels,channel);
         serverAssertWithInfo(c,NULL,de != NULL);
         clients = dictGetVal(de);
         ln = listSearchKey(clients,c);
         serverAssertWithInfo(c,NULL,ln != NULL);
         listDelNode(clients,ln);
+        /* 如果该channel上没有其它订阅者，则从server.pubsub_channels上删除该channel */
         if (listLength(clients) == 0) {
             /* Free the list and associated hash entry at all if this was
              * the latest client, so that it will be possible to abuse
@@ -195,7 +203,9 @@ int pubsubUnsubscribeChannel(client *c, robj *channel, int notify) {
         }
     }
     /* Notify the client */
+    /* 如果需要的话，生成回复 */
     if (notify) addReplyPubsubUnsubscribed(c,channel);
+    /* 减少引用计数 */
     decrRefCount(channel); /* it is finally safe to release it */
     return retval;
 }
@@ -277,6 +287,7 @@ int pubsubUnsubscribeAllPatterns(client *c, int notify) {
 }
 
 /* Publish a message */
+//发布消息
 int pubsubPublishMessage(robj *channel, robj *message) {
     int receivers = 0;
     dictEntry *de;
@@ -284,8 +295,9 @@ int pubsubPublishMessage(robj *channel, robj *message) {
     listIter li;
 
     /* Send to clients listening for that channel */
+    //从服务端pubsub_channels找到所有订阅了该频道的客户端列表
     de = dictFind(server.pubsub_channels,channel);
-    if (de) {
+    if (de) {//如果存在订阅该频道的列表，则遍历所有的客户端，一个答复
         list *list = dictGetVal(de);
         listNode *ln;
         listIter li;
@@ -298,12 +310,15 @@ int pubsubPublishMessage(robj *channel, robj *message) {
         }
     }
     /* Send to clients listening to matching channels */
-    if (listLength(server.pubsub_patterns)) {
+    /* 如果pattern也有client在订阅，那么还要进行模式的匹配并发送消息给相应的client */
+    if (listLength(server.pubsub_patterns)) {//如果server.pubsub_patterns，说明有些client采用模式订阅
         listRewind(server.pubsub_patterns,&li);
+        //遍历模式订阅的列表，判断是否有客户端订阅的模式和当前channel匹配
         channel = getDecodedObject(channel);
         while ((ln = listNext(&li)) != NULL) {
+            //获得列表节点上的值
             pubsubPattern *pat = ln->value;
-
+            //获得节点元素的pat
             if (stringmatchlen((char*)pat->pattern->ptr,
                                 sdslen(pat->pattern->ptr),
                                 (char*)channel->ptr,

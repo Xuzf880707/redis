@@ -56,12 +56,15 @@ list *listCreate(void)
 void listEmpty(list *list)
 {
     unsigned long len;
+    //初始化当前节点和下一个节点的指针
     listNode *current, *next;
-
+    //当前节点指向头节点
     current = list->head;
     len = list->len;
+    //从头节点开始遍历链表
     while(len--) {
         next = current->next;
+        //释放链表上的元素占用的内存
         if (list->free) list->free(current->value);
         zfree(current);
         current = next;
@@ -73,8 +76,10 @@ void listEmpty(list *list)
 /* Free the whole list.
  *
  * This function can't fail. */
+ //释放链表上的内存
 void listRelease(list *list)
 {
+    //将链表上的元素清空
     listEmpty(list);
     zfree(list);
 }

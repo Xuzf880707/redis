@@ -425,8 +425,8 @@ static void dictSdsDestructor(void *privdata, void *val)
 
 void dictListDestructor(void *privdata, void *val)
 {
-    DICT_NOTUSED(privdata);
-    listRelease((list*)val);
+    DICT_NOTUSED(privdata);//释放引用内存
+    listRelease((list*)val);//遍历删除链表上的元素
 }
 
 /* _serverAssert is needed by dict */

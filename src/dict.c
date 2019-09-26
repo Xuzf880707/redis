@@ -148,6 +148,7 @@ int dictExpand(dict *d, unsigned long size)
 {
     /* the size is invalid if it is smaller than the number of
      * elements already inside the hash table */
+     /* 如果正在rehash或者新哈希表的大小小于现已使用，则返回error */
     if (dictIsRehashing(d) || d->ht[0].used > size)
         return DICT_ERR;
 
@@ -262,8 +263,13 @@ static void _dictRehashStep(dict *d) {
 }
 
 /* Add an element to the target hash table */
+/**
+*开始往哈希表里添加元素
+**/
+
 int dictAdd(dict *d, void *key, void *val)
 {
+    //
     dictEntry *entry = dictAddRaw(d,key,NULL);
 
     if (!entry) return DICT_ERR;
@@ -289,16 +295,19 @@ int dictAdd(dict *d, void *key, void *val)
  *
  * If key was added, the hash entry is returned to be manipulated by the caller.
  */
+ //将key插入到哈希表里
 dictEntry *dictAddRaw(dict *d, void *key, dictEntry **existing)
 {
     long index;
     dictEntry *entry;
     dictht *ht;
-
-    if (dictIsRehashing(d)) _dictRehashStep(d);
+    //判断字典的rehash状态：rehashidx是否等于-1，
+    //如果rehashIndex!=-1，则表示在rehash中，则执行单步rehash
+    if (dictIsRehashing(d)) _dictRehashStep(d);//// 如果哈希表在rehashing，则执行单步rehash
 
     /* Get the index of the new element, or -1 if
      * the element already exists. */
+     /* 获得索引位置上新的元素，如果元素已存在，则返回-1 */
     if ((index = _dictKeyIndex(d, key, dictHashKey(d,key), existing)) == -1)
         return NULL;
 
@@ -306,13 +315,16 @@ dictEntry *dictAddRaw(dict *d, void *key, dictEntry **existing)
      * Insert the element in top, with the assumption that in a database
      * system it is more likely that recently added entries are accessed
      * more frequently. */
+    // 如果哈希表在rehashing，新增元素只需加入到ht[1]
     ht = dictIsRehashing(d) ? &d->ht[1] : &d->ht[0];
-    entry = zmalloc(sizeof(*entry));
-    entry->next = ht->table[index];
+    entry = zmalloc(sizeof(*entry));// 为新增的节点分配内存
+    entry->next = ht->table[index];//  将节点插入链表表头
+    // 更新节点和桶信息
     ht->table[index] = entry;
-    ht->used++;
+    ht->used++;//  更新ht已用的used属性值
 
     /* Set the hash entry fields. */
+     /* 设置新节点的键 */
     dictSetKey(d, entry, key);
     return entry;
 }
@@ -361,32 +373,41 @@ dictEntry *dictAddOrFind(dict *d, void *key) {
 /* Search and remove an element. This is an helper function for
  * dictDelete() and dictUnlink(), please check the top comment
  * of those functions. */
+ //nofree决定是否要销毁目标键值对
 static dictEntry *dictGenericDelete(dict *d, const void *key, int nofree) {
     uint64_t h, idx;
     dictEntry *he, *prevHe;
     int table;
-
+    // 字典（的哈希表）为空,则直接返回
     if (d->ht[0].used == 0 && d->ht[1].used == 0) return NULL;
-
+    //判断是否在rehash扩容或缩容
     if (dictIsRehashing(d)) _dictRehashStep(d);
     h = dictHashKey(d, key);
-
-    for (table = 0; table <= 1; table++) {
+    // 遍历哈希表：ht[0]和ht[1]
+    for (table = 0; table <= 1; table++) {//遍历ht[0]和ht[1]
+        // 遍历数组上的元素索引
         idx = h & d->ht[table].sizemask;
+        // he指向该索引上的链表
         he = d->ht[table].table[idx];
         prevHe = NULL;
-        while(he) {
+        // 遍历链表上的所有节点
+        while(he) {//循环遍历
             if (key==he->key || dictCompareKeys(d, key, he->key)) {
                 /* Unlink the element from the list */
+                // 从链表中删除
                 if (prevHe)
                     prevHe->next = he->next;
                 else
                     d->ht[table].table[idx] = he->next;
+                // 释放调用键和值的释放函数进行释放内存
                 if (!nofree) {
+                    //释放节点的key
                     dictFreeKey(d, he);
+                    //释放节点的的value
                     dictFreeVal(d, he);
                     zfree(he);
                 }
+                // 更新已使用节点数量
                 d->ht[table].used--;
                 return he;
             }
@@ -847,16 +868,17 @@ unsigned long dictScan(dict *d,
 
     if (dictSize(d) == 0) return 0;
 
-    if (!dictIsRehashing(d)) {
-        t0 = &(d->ht[0]);
-        m0 = t0->sizemask;
+    if (!dictIsRehashing(d)) {// 判断是否正在rehashing，如果不在则只有ht[0]
+        t0 = &(d->ht[0]);// ht[0]
+        m0 = t0->sizemask;// 掩码
 
         /* Emit entries at cursor */
+        // 目标桶 找到当前这个槽位，然后处理数据
         if (bucketfn) bucketfn(privdata, &t0->table[v & m0]);
         de = t0->table[v & m0];
-        while (de) {
+        while (de) { // 遍历桶中所有节点，并通过回调函数fn()返回
             next = de->next;
-            fn(privdata, de);
+            fn(privdata, de);//将这个slot的链表数据全部入队，准备返回给客户端。
             de = next;
         }
 
@@ -869,20 +891,21 @@ unsigned long dictScan(dict *d,
         v++;
         v = rev(v);
 
-    } else {
+    } else {// 否则说明正在rehashing，就存在两个哈希表ht[0]、ht[1]
         t0 = &d->ht[0];
-        t1 = &d->ht[1];
+        t1 = &d->ht[1];// 指向两个哈希表
 
         /* Make sure t0 is the smaller and t1 is the bigger table */
-        if (t0->size > t1->size) {
+        if (t0->size > t1->size) {//确保t0小于t1
             t0 = &d->ht[1];
             t1 = &d->ht[0];
         }
-
+        // 相对应的掩码
         m0 = t0->sizemask;
         m1 = t1->sizemask;
 
         /* Emit entries at cursor */
+        /* 迭代(小表)t0桶中的所有节点 */
         if (bucketfn) bucketfn(privdata, &t0->table[v & m0]);
         de = t0->table[v & m0];
         while (de) {
@@ -893,6 +916,7 @@ unsigned long dictScan(dict *d,
 
         /* Iterate over indices in larger table that are the expansion
          * of the index pointed to by the cursor in the smaller table */
+         /* 迭代(大表)t1 中所有节点，循环迭代，会把小表没有覆盖的slot全部扫描一遍 */
         do {
             /* Emit entries at cursor */
             if (bucketfn) bucketfn(privdata, &t1->table[v & m1]);
@@ -960,6 +984,12 @@ static unsigned long _dictNextPower(unsigned long size)
  *
  * Note that if we are in the process of rehashing the hash table, the
  * index is always returned in the context of the second (new) hash table. */
+ /*
+ * d：目标字典
+ *key:键
+ *hash:键的hash值
+ *existing=null
+ */
 static long _dictKeyIndex(dict *d, const void *key, uint64_t hash, dictEntry **existing)
 {
     unsigned long idx, table;
@@ -967,6 +997,7 @@ static long _dictKeyIndex(dict *d, const void *key, uint64_t hash, dictEntry **e
     if (existing) *existing = NULL;
 
     /* Expand the hash table if needed */
+    //判断是否需要扩展hash
     if (_dictExpandIfNeeded(d) == DICT_ERR)
         return -1;
     for (table = 0; table <= 1; table++) {

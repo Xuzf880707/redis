@@ -1890,19 +1890,15 @@ int serverCron(struct aeEventLoop *eventLoop, long long id, void *clientData) {
         rewriteAppendOnlyFileBackground();
     }
 
-    /* Check if a background saving or AOF rewrite in progress terminated. */
+     /* 判断后台是否正在进行 rdb 或者 aof 操作 */
     if (server.rdb_child_pid != -1 || server.aof_child_pid != -1 ||
-        ldbPendingChildren())
-    {
+        ldbPendingChildren()){
         int statloc;
         pid_t pid;
-
         if ((pid = wait3(&statloc,WNOHANG,NULL)) != 0) {
             int exitcode = WEXITSTATUS(statloc);
             int bysignal = 0;
-
             if (WIFSIGNALED(statloc)) bysignal = WTERMSIG(statloc);
-
             if (pid == -1) {
                 serverLog(LL_WARNING,"wait3() returned an error: %s. "
                     "rdb_child_pid = %d, aof_child_pid = %d",
@@ -1925,16 +1921,10 @@ int serverCron(struct aeEventLoop *eventLoop, long long id, void *clientData) {
             updateDictResizePolicy();
             closeChildInfoPipe();
         }
-    } else {
-        /* If there is not a background saving/rewrite in progress check if
-         * we have to save/rewrite now. */
+    } else {//如果目前没有aof或者rdb，则开始准备save了
         for (j = 0; j < server.saveparamslen; j++) {
             struct saveparam *sp = server.saveparams+j;
-
-            /* Save if we reached the given amount of changes,
-             * the given amount of seconds, and if the latest bgsave was
-             * successful or if, in case of an error, at least
-             * CONFIG_BGSAVE_RETRY_DELAY seconds already elapsed. */
+            //如果数据保存记录 大于规定的修改次数 且距离 上一次保存的时间大于规定时间或者上次BGSAVE命令执行成功，才执行 BGSAVE 操作
             if (server.dirty >= sp->changes &&
                 server.unixtime-server.lastsave > sp->seconds &&
                 (server.unixtime-server.lastbgsave_try >
@@ -2235,6 +2225,7 @@ void initServerConfig(void) {
     server.active_defrag_cycle_max = CONFIG_DEFAULT_DEFRAG_CYCLE_MAX;
     server.active_defrag_max_scan_fields = CONFIG_DEFAULT_DEFRAG_MAX_SCAN_FIELDS;
     server.proto_max_bulk_len = CONFIG_DEFAULT_PROTO_MAX_BULK_LEN;
+    //在服务端设置每个客户端的最大的输入缓冲区的大小
     server.client_max_querybuf_len = PROTO_MAX_QUERYBUF_LEN;
     server.saveparams = NULL;
     server.loading = 0;
@@ -3038,12 +3029,14 @@ struct redisCommand *lookupCommandOrOriginal(sds name) {
  * This should not be used inside commands implementation. Use instead
  * alsoPropagate(), preventCommandPropagation(), forceCommandPropagation().
  */
+ //redis每次写完命令后都会判断是否需要执行追加aof文件
 void propagate(struct redisCommand *cmd, int dbid, robj **argv, int argc,
                int flags)
 {
+    //如果AOF开关是打开的
     if (server.aof_state != AOF_OFF && flags & PROPAGATE_AOF)
-        feedAppendOnlyFile(cmd,dbid,argv,argc);
-    if (flags & PROPAGATE_REPL)
+        feedAppendOnlyFile(cmd,dbid,argv,argc);//执行将命令追加到AOF文件中
+    if (flags & PROPAGATE_REPL)//如果开启主从复制功能，则将命令传播给从服务
         replicationFeedSlaves(server.slaves,dbid,argv,argc);
 }
 
