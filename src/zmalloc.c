@@ -292,6 +292,8 @@ size_t zmalloc_get_rss(void) {
 }
 #else
 size_t zmalloc_get_rss(void) {
+    //如果无法以特定于操作系统的方式获得这个系统的rss，那么就只返回used_memory，这个时候
+    //fragmentation_radio永远都是1
     /* If we can't get the RSS in an OS-specific way for this system just
      * return the memory usage we estimated in zmalloc()..
      *

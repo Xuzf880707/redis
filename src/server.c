@@ -1672,11 +1672,10 @@ void clientsCron(void) {
  * incrementally in Redis databases, such as active key expiring, resizing,
  * rehashing. */
 void databasesCron(void) {
-    /* Expire keys by random sampling. Not required for slaves
-     * as master will synthesize DELs for us. */
-    if (server.active_expire_enabled && server.masterhost == NULL) {
+     //通过随机抽样使键过期，不需要在slave上执行，因为master会通过给slave
+    if (server.active_expire_enabled && server.masterhost == NULL) {//如果是master
         activeExpireCycle(ACTIVE_EXPIRE_CYCLE_SLOW);
-    } else if (server.masterhost != NULL) {
+    } else if (server.masterhost != NULL) {//如果是slave
         expireSlaveKeys();
     }
 
@@ -1811,9 +1810,10 @@ int serverCron(struct aeEventLoop *eventLoop, long long id, void *clientData) {
     atomicSet(server.lruclock,lruclock);
 
     /* Record the max memory used since the server was started. */
+    //stat_peak_memory记录了used_memory的峰值
     if (zmalloc_used_memory() > server.stat_peak_memory)
         server.stat_peak_memory = zmalloc_used_memory();
-
+    //每100毫秒运行一次
     run_with_period(100) {
         /* Sample the RSS and other metrics here since this is a relatively slow call.
          * We must sample the zmalloc_used at the same time we take the rss, otherwise
@@ -3939,12 +3939,12 @@ sds genRedisInfoString(char *section) {
         if (zmalloc_used > server.stat_peak_memory)
             server.stat_peak_memory = zmalloc_used;
 
-        bytesToHuman(hmem,zmalloc_used);
-        bytesToHuman(peak_hmem,server.stat_peak_memory);
-        bytesToHuman(total_system_hmem,total_system_mem);
+        bytesToHuman(hmem,zmalloc_used);//
+        bytesToHuman(peak_hmem,server.stat_peak_memory);//zmalloc_used的峰值
+        bytesToHuman(total_system_hmem,total_system_mem);//系统内存大小
         bytesToHuman(used_memory_lua_hmem,memory_lua);
-        bytesToHuman(used_memory_scripts_hmem,mh->lua_caches);
-        bytesToHuman(used_memory_rss_hmem,server.cron_malloc_stats.process_rss);
+        bytesToHuman(used_memory_scripts_hmem,mh->lua_caches);//lua脚本分配的内存
+        bytesToHuman(used_memory_rss_hmem,server.cron_malloc_stats.process_rss);//分配给服务器进程的内存大小
         bytesToHuman(maxmemory_hmem,server.maxmemory);
 
         if (sections++) info = sdscat(info,"\r\n");

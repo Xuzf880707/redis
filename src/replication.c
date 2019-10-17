@@ -1603,29 +1603,27 @@ void syncWithMaster(aeEventLoop *el, int fd, void *privdata, int mask) {
     UNUSED(el);
     UNUSED(privdata);
     UNUSED(mask);
-
-    /* If this event fired after the user turned the instance into a master
-     * with SLAVEOF NO ONE we must just return ASAP. */
+     //如果是执行slave no one，则我们直接把socket套接字关掉，并返回
     if (server.repl_state == REPL_STATE_NONE) {
-        close(fd);
+        close(fd);//关掉socket套接字
         return;
     }
 
     /* Check for errors in the socket: after a non blocking connect() we
      * may find that the socket is in error state. */
-    if (getsockopt(fd, SOL_SOCKET, SO_ERROR, &sockerr, &errlen) == -1)
-        sockerr = errno;
+    if (getsockopt(fd, SOL_SOCKET, SO_ERROR, &sockerr, &errlen) == -1) //创建一个socket套接字
+        sockerr = errno;//如果创建套接字返回-1，则表示创建失败
     if (sockerr) {
-        serverLog(LL_WARNING,"Error condition on socket for SYNC: %s",
-            strerror(sockerr));
+        serverLog(LL_WARNING,"Error condition on socket for SYNC: %s",strerror(sockerr));
         goto error;
     }
-
     /* Send a PING to check the master is able to reply without errors. */
+    //套接字创建成功后，从节点会向主节点发送PIN命令，检查创建的套接字是否可用
     if (server.repl_state == REPL_STATE_CONNECTING) {
         serverLog(LL_NOTICE,"Non blocking connect for SYNC fired the event.");
         /* Delete the writable event so that the readable event remains
          * registered and we can wait for the PONG reply. */
+         //删除套接字的写权限，只保留读权限
         aeDeleteFileEvent(server.el,fd,AE_WRITABLE);
         server.repl_state = REPL_STATE_RECEIVE_PONG;
         /* Send the PING, don't check for errors at all, we have the timeout
@@ -1636,6 +1634,7 @@ void syncWithMaster(aeEventLoop *el, int fd, void *privdata, int mask) {
     }
 
     /* Receive the PONG command. */
+    //如果接收主节点的响应，则开始向服务端发送认证信息
     if (server.repl_state == REPL_STATE_RECEIVE_PONG) {
         err = sendSynchronousCommand(SYNC_CMD_READ,fd,NULL);
 
@@ -1660,6 +1659,7 @@ void syncWithMaster(aeEventLoop *el, int fd, void *privdata, int mask) {
     }
 
     /* AUTH with the master if required. */
+    //如果主节点设置了requirepass参数，则需要权限认证的话，要发起权限认证。
     if (server.repl_state == REPL_STATE_SEND_AUTH) {
         if (server.masteruser && server.masterauth) {
             err = sendSynchronousCommand(SYNC_CMD_WRITE,fd,"AUTH",
@@ -1691,6 +1691,7 @@ void syncWithMaster(aeEventLoop *el, int fd, void *privdata, int mask) {
 
     /* Set the slave port, so that Master's INFO command can list the
      * slave listening port correctly. */
+     //将slave节点的端口发送给master，便于master的info命令可以列出所有的绑定的slave节点
     if (server.repl_state == REPL_STATE_SEND_PORT) {
         sds port = sdsfromlonglong(server.slave_announce_port ?
             server.slave_announce_port : server.port);
@@ -1775,11 +1776,8 @@ void syncWithMaster(aeEventLoop *el, int fd, void *privdata, int mask) {
         server.repl_state = REPL_STATE_SEND_PSYNC;
     }
 
-    /* Try a partial resynchonization. If we don't have a cached master
-     * slaveTryPartialResynchronization() will at least try to use PSYNC
-     * to start a full resynchronization so that we get the master run id
-     * and the global offset, to try a partial resync at the next
-     * reconnection attempt. */
+   //先尝试部分同步，如果是第一次尝试部分同步的话，则会触发一个全量同步，从而获取master节点的运行ID和全局偏移量。
+   //这样在下次重新链接的时候，可以尝试部分同步
     if (server.repl_state == REPL_STATE_SEND_PSYNC) {
         if (slaveTryPartialResynchronization(fd,0) == PSYNC_WRITE_ERROR) {
             err = sdsnew("Write error sending the PSYNC command.");
